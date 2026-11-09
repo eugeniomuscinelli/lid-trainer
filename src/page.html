@@ -1,0 +1,215 @@
+<div class="wrap">
+  <div class="head">
+    <h1>LID Table Trainer</h1>
+    <span class="sub">Latency-insensitive RTL traces, HW3-style: data(void, stop) per channel, one-stop-to-stall backpressure. Fill the table, check it, then watch it animate.</span>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-build" aria-selected="true" data-tab="build">Build your own</button>
+    <button role="tab" id="tab-gen" aria-selected="false" data-tab="gen">Challenge me</button>
+    <button role="tab" id="tab-conv" aria-selected="false" data-tab="conv">Conventions</button>
+    <button role="tab" id="tab-anim" aria-selected="false" data-tab="anim" title="Animate the current system cycle by cycle, with the explanation of each cycle">▶ Animate</button>
+  </div>
+
+  <section id="pane-build" class="panel">
+    <div class="cols">
+      <div>
+        <h2>1. Describe the system and the givens</h2>
+        <div class="row">
+          <label class="f">Load example
+            <select id="example">
+              <option value="hw3d">HW3 Problem 3(d): single shell, 2-slot queues</option>
+              <option value="hw3e">HW3 Problem 3(e): same with output backpressure</option>
+              <option value="hw3b">HW3 Problem 3(b): infinite queues</option>
+              <option value="hw3c">HW3 Problem 3(c): infinite queues + backpressure</option>
+              <option value="macslide">Lecture 12 MAC, exact slide instance (pages 6–9)</option>
+              <option value="mac">Lecture 12 MAC variation with other inputs</option>
+              <option value="pipe">Two shells with a relay station</option>
+              <option value="loop">Feedback loop through a relay station (MST 2/3)</option>
+              <option value="fork">Reconvergent paths with a relay station</option>
+            </select>
+          </label>
+          <button class="btn" id="btn-load">Load</button>
+        </div>
+        <textarea id="spec" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary" id="btn-build">Generate the table</button>
+          <span class="hint">Inputs: value per cycle, <code>v</code> suffix = void token (e.g. <code>2v</code>), <code>-</code> = unknown value. Stops: 0/1 per cycle.</span>
+        </div>
+        <div class="err" id="spec-err"></div>
+      </div>
+      <div>
+        <h2>Spec format</h2>
+        <pre class="spec">cycles 15            # timestamps n = 1..15
+queue 2              # input-queue capacity (number or inf)
+
+shell S              # a shell encapsulating one core
+  in x               # primary input channel
+  in p &lt;- A.q rs 1   # channel from register q of shell A,
+                     #   pipelined with 1 relay station
+  reg a = x + y init 2   # registered output a(n+1) = x(n)+y(n)
+  reg m = a * z init -   # init = value at n = 1
+
+output m = S.m       # primary output, read from S.m
+
+x: 3 2 2v 1 4 5      # what the environment sends on x
+stop m: 0 0 0 0 1 0  # stopIn on m from the environment</pre>
+        <p class="hint" style="margin-top:8px">Expressions can use <code>+ - * / %</code>, comparisons, <code>&amp;&amp; || !</code> and <code>c ? a : b</code>. Each <code>reg</code> is a flip-flop: its value at n+1 is the expression evaluated on the values at n (inputs and other registers of the same shell).</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="pane-gen" class="panel hidden">
+    <h2>Let the trainer pick a system and the givens</h2>
+    <div class="row">
+      <label class="f">Shells
+        <select id="g-shells"><option value="any">any</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+      </label>
+      <label class="f">Feedback loop
+        <select id="g-feedback"><option value="any">any</option><option value="no">no</option><option value="yes">yes</option></select>
+      </label>
+      <label class="f">Relay stations
+        <select id="g-rs"><option value="any">any</option><option value="no">no</option><option value="yes">yes</option></select>
+      </label>
+      <label class="f">Structure
+        <select id="g-structure"><option value="random" selected>random netlist</option><option value="templates">course templates</option></select>
+      </label>
+      <label class="f">Cycles <input type="number" id="g-cycles" min="6" max="25" value="12"></label>
+      <label class="f">Queue capacity
+        <select id="g-queue"><option value="2">2</option><option value="3">3</option><option value="inf">infinite</option><option value="rand" selected>random</option></select>
+      </label>
+      <label class="f">Void rate <input type="number" id="g-void" min="0" max="60" value="15">%</label>
+      <label class="f">Stop rate <input type="number" id="g-stop" min="0" max="60" value="15">%</label>
+      <label class="f">Seed <input type="text" id="g-seed" placeholder="random" style="width:7em"></label>
+      <button class="btn primary" id="btn-gen">New exercise</button>
+    </div>
+    <p class="hint" style="margin-top:8px">The generated spec is copied into “Build your own”, so you can tweak it afterwards.</p>
+  </section>
+
+  <section id="pane-conv" class="panel conv hidden">
+    <h2>Protocol conventions used by the checker</h2>
+    <p>These follow the shell and relay-station designs of Lecture 12 and the traces of HW3 (Problem 3). If your course uses a variant, tell Claude and the rules can be adjusted.</p>
+    <h2 style="margin-top:14px">Shell control logic (Lecture 12 notation)</h2>
+    <p>For a shell with input channels <i>I</i> and output channels <i>O</i>; <code>empty<sub>i</sub></code> and <code>full<sub>i</sub></code> are the state of queue <i>i</i> at the start of the cycle, <code>x⁺</code> is the value registered for the next cycle.</p>
+    <pre class="spec">fire        = ∧<sub>i∈I</sub> ( ¬voidIn<sub>i</sub> ∨ ¬empty<sub>i</sub> )  ∧  ¬ ∨<sub>j∈O</sub> ( stopIn<sub>j</sub> ∧ ¬voidOut<sub>j</sub> )
+
+voidOut<sub>j</sub>⁺  = 0        if stopIn<sub>j</sub> ∧ ¬voidOut<sub>j</sub>        (token repeated for receiver j)
+            = ¬fire    otherwise
+
+stopOut<sub>i</sub>    = full<sub>i</sub>
+
+enq<sub>i</sub>       = ¬voidIn<sub>i</sub> ∧ ( ¬fire ∨ ¬empty<sub>i</sub> ) ∧ ¬full<sub>i</sub>
+deq<sub>i</sub>       = ¬empty<sub>i</sub> ∧ fire
+bypass<sub>i</sub>    = empty<sub>i</sub>                          (a token arriving into an empty queue while firing is used directly)
+
+registers⁺ = core( popped / bypassed tokens, registers )   if fire;  unchanged otherwise</pre>
+    <p class="hint">The checker computes every cell of the table from these equations; the prose below is the same rules in words.</p>
+    <ul>
+      <li><b>Timing.</b> Every register, every void bit and every stop bit is clocked: the values in row n are the state at timestamp n. A register's value at n+1 is computed from the values at n. Row 1 holds the initial state (registers at their init value, queues empty, relay stations holding a void token).</li>
+      <li><b>Input queues.</b> Each shell input has a bypassable queue. A valid token arriving at n when stop=0 is accepted; it is consumed immediately (bypass) if the queue is empty and the shell fires at n, otherwise it is stored behind the tokens already there. Void tokens are never stored.</li>
+      <li><b>Firing.</b> A shell fires at n iff every input channel has a token available (queue head, or the token arriving at n) and none of its <i>valid</i> output tokens is being stopped at n. When it fires it pops one token from every input queue, and the core computes the registers for n+1 (void = 0 on every output).</li>
+      <li><b>Stalling.</b> If some input has no token, the shell stalls: registers hold, and at n+1 each output repeats its token marked void = 1 (the receiver already sampled it). If instead a valid output token is stopped at n, the shell also stalls, but that output repeats the token at n+1 with void = 0, since the receiver did not sample it.</li>
+      <li><b>Stop (one-stop-to-stall backpressure).</b> The stop bit a shell raises on an input channel at n is 1 iff the tokens left in that queue from the previous cycles already fill it. The token arriving at n is then rejected, and the sender must repeat it at n+1. The environment repeats a rejected token at n+1; if the environment was going to send a void bubble at n+1, the bubble is absorbed by the repeat; otherwise the rest of the stream shifts by one cycle.</li>
+      <li><b>Queue column.</b> Shows the tokens stored in the queue at n, before the pop of cycle n: the leftover tokens from earlier cycles plus the token arriving at n if it was accepted and not bypassed. Empty queue = leave blank.</li>
+      <li><b>Relay station</b> (capacity 2, latency 1, init void). In the processing state it relays the incoming token (valid or void) to its output at n+1. If its valid output token is stopped at n: a void incoming token is discarded and the output is repeated; a valid incoming token is parked in the auxiliary flip-flop, the output is repeated, and stopOut goes to 1 at n+1 (stalling state). In the stalling state the incoming token is rejected; when stopIn drops, the parked token moves to the output at n+1 and stopOut drops.</li>
+      <li><b>Unknown values.</b> <code>-</code> is a valid token with unknown value; any computation involving it gives <code>-</code>.</li>
+      <li><b>Answers.</b> Blank void/stop cells count as 0; a blank queue cell means empty; a blank data cell counts as unanswered. Queue contents are written head first, e.g. <code>2,7</code>. A backslash on the head, <code>\2,7</code>, means “2 was at the head at this cycle and the shell fired, so it was consumed” (the solution uses this notation; omitting the backslash is also accepted, marking a head as consumed when the shell stalls is not). A token that bypasses the queue is not stored: leave the cell blank or write <code>\5</code>. The data of a void token is don't-care: the solution shows the repeated value (as in HW3) but <code>-</code> is accepted too (as in the slides).</li>
+    </ul>
+  </section>
+
+  <section id="sysview" class="panel hidden">
+    <div class="sys">
+      <div>
+        <h2>Schematic</h2>
+        <div class="diagram" id="schematic"></div>
+        <p class="hint" style="margin-top:6px">Dashed boundary = shell; stacked slots = bypassable input queue; circles = combinational logic; ▲ boxes = flip-flops (the registers you fill in); RS = relay station. Void/stop wires are omitted.</p>
+        <details style="margin-top:8px"><summary>Block diagram (shells only)</summary><div class="diagram" id="diagram"></div></details>
+      </div>
+    </div>
+  </section>
+
+  <section id="tableview" class="panel hidden">
+    <div class="row" style="justify-content:space-between">
+      <div class="row">
+        <h2 style="margin:0">2. Fill the table</h2>
+        <span class="pill" id="count"></span>
+      </div>
+      <div class="row">
+        <label class="f"><input type="checkbox" id="opt-queues" checked> queue columns (q, next to each input)</label>
+        <label class="f"><input type="checkbox" id="opt-strict"> strict reference table</label>
+      </div>
+    </div>
+    <div class="legend" style="margin:8px 0">
+      <span><span class="sw" style="background:var(--given)"></span>given</span>
+      <span><span class="sw" style="background:var(--ok-soft);border-color:var(--ok)"></span>correct</span>
+      <span><span class="sw" style="background:var(--bad-soft);border-color:var(--bad)"></span>wrong</span>
+      <span><span class="sw" style="background:var(--warn-soft);border-color:var(--warn)"></span>left blank</span>
+      <span><span class="sw" style="background:var(--accent-soft);border-color:var(--accent)"></span>revealed</span>
+      <span class="hint">Queues: head first, <code>\2,7</code> = head consumed this cycle. Enter / arrow keys ↑↓ move along a column; checking is only from the button.</span>
+    </div>
+    <div class="tablewrap"><table class="trace" id="trace"></table></div>
+    <div id="strictwrap" class="hidden" style="margin-top:12px">
+      <h2>Strict reference (no shells, no voids)</h2>
+      <div class="tablewrap"><table class="trace" id="strict"></table></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" id="btn-check">Check my answers</button>
+      <button class="btn" id="btn-unmark">Hide marks</button>
+      <button class="btn" id="btn-reveal">Reveal solution</button>
+      <button class="btn" id="btn-clear">Clear answers</button>
+      <button class="btn" id="btn-explain">Explain cycle by cycle</button>
+      <button class="btn" id="btn-anim" title="Watch this table unfold on the schematic, one cycle at a time">▶ Animate this table</button>
+    </div>
+    <div id="results" style="margin-top:12px"></div>
+    <div id="cycles" class="cyc hidden"></div>
+  </section>
+
+  <section id="factsview" class="panel hidden">
+    <h2>Facts about this system</h2>
+    <dl class="facts" id="facts"></dl>
+  </section>
+
+  <section id="animview" class="panel hidden">
+    <div class="row" style="justify-content:space-between">
+      <div class="row">
+        <h2 style="margin:0">Animation of the trace</h2>
+        <span class="hint">The system you built above, clock by clock: tokens travelling, bubbles, queues filling, stop bits pushing back. Below the schematic: what happens at the current cycle, and the table filling in row by row.</span>
+      </div>
+      <button class="btn" id="a-back">← Back to the table</button>
+    </div>
+    <div class="err" id="a-err"></div>
+    <div class="diagram" id="a-schematic"></div>
+    <div class="phasebar"><div id="a-phasefill"></div></div>
+    <div class="phasetext" id="a-phase"></div>
+    <div class="transport">
+      <button class="tb" id="a-first" title="First cycle (Home)">⏮</button>
+      <button class="tb" id="a-prev" title="Previous cycle (←)">◀</button>
+      <button class="tb primary" id="a-play" title="Play / pause (space)">▶</button>
+      <button class="tb" id="a-next" title="Step: animate to the next cycle (→)">▶|</button>
+      <button class="tb" id="a-last" title="Last cycle (End)">⏭</button>
+      <span class="cyclebig"><span id="a-cyc-n">n = 1</span><small id="a-cyc-N">/ 15</small></span>
+      <input type="range" id="a-scrub" min="1" max="15" step="0.01" value="1" aria-label="Cycle (drag slowly to scrub through the animation of a cycle)">
+      <label class="f">Speed
+        <select id="a-speed"><option value="0.1">0.1× (very slow)</option><option value="0.2">0.2×</option><option value="0.35">0.35×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+      </label>
+      <label class="f"><input type="checkbox" id="a-opt-core" checked> values inside the core</label>
+    </div>
+    <div class="legend">
+      <span><span class="sw"></span>valid token</span>
+      <span><span class="sw void"></span>void token (bubble)</span>
+      <span><span class="sw rej"></span>rejected by stop = 1</span>
+      <span><span class="sw core"></span>value computed by the core</span>
+      <span><span class="sw aux"></span>token parked in a relay station</span>
+      <span class="hint">Keys: space play, ← → step, Home / End. Drag the slider slowly to scrub through a cycle by hand.</span>
+    </div>
+
+    <div class="narr" id="a-narr"></div>
+
+    <div class="tablehead">
+      <h2 style="margin:0">The table, filled in up to the current cycle</h2>
+      <label class="f"><input type="checkbox" id="a-showall"> show the rows ahead too</label>
+    </div>
+    <div class="tablewrap" style="margin-top:8px"><table class="trace" id="a-trace"></table></div>
+    <p class="hint" style="margin-top:8px">Row n is the state at timestamp n (same conventions as the trainer: <code>\2,7</code> in a queue column = head consumed at this cycle). The animation between row n and row n+1 shows what happens during cycle n. Click a row to jump to it.</p>
+  </section>
+</div>
